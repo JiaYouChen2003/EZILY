@@ -1,5 +1,6 @@
 import time
 import random
+import argparse
 import torch
 import torchvision
 import google.generativeai as genai
@@ -56,8 +57,9 @@ def create_classifier(class_names, k=10):
     Returns:
     A zero-shot image classification model.
     """
-    assert k >= len(class_ps), "k should be greater than or equal to the number of class prompts."
-    assert k % len(class_ps) == 0, "k should be a multiple of the number of class prompts."
+    if k != 0:
+        assert k >= len(class_ps), "k should be greater than or equal to the number of class prompts."
+        assert k % len(class_ps) == 0, "k should be a multiple of the number of class prompts."
 
     weights = []
     for class_name in tqdm.tqdm(class_names):
@@ -65,12 +67,14 @@ def create_classifier(class_names, k=10):
         template_feature = encoder.encode_text(f"A photo of {class_name}")
         llm_class_description = torch.zeros((1, encoder.output_feature_length))
 
-        for _ in range(k // len(class_ps)):
-            for class_p in class_ps:
-                llm_description = gemini_process(class_p.format(class_name=class_name), temperature=0.99)
-                llm_class_description += encoder.encode_text(llm_description)
+        if k != 0:
+            for _ in range(k // len(class_ps)):
+                for class_p in class_ps:
+                    llm_description = gemini_process(class_p.format(class_name=class_name), temperature=0.99)
+                    llm_class_description += encoder.encode_text(llm_description)
 
-        llm_class_description /= k
+            llm_class_description /= k
+
         class_feature = class_name_feature + template_feature + llm_class_description
         normalized_class_feature = class_feature / class_feature.norm(dim=-1, keepdim=True)
         weights.append(normalized_class_feature.squeeze())
@@ -80,7 +84,7 @@ def create_classifier(class_names, k=10):
     return model
 
 
-def classify(image, classifier):
+def classify(image, classifier, use_llm=True):
     """
     Performs zero-shot image classification.
     Args:
@@ -93,15 +97,19 @@ def classify(image, classifier):
     """
     image_feature = encoder.encode_image(image)
 
-    # Gemini Pro for initial classification prediction
-    initial_prediction = gemini_process(classification_p.format(classes=classifier["class_names"]), image, temperature=0.99)
-    prediction_feature = encoder.encode_text(initial_prediction)
+    if use_llm:
+        # Gemini Pro for initial classification prediction
+        initial_prediction = gemini_process(classification_p.format(classes=classifier["class_names"]), image, temperature=0.99)
+        prediction_feature = encoder.encode_text(initial_prediction)
 
-    # Gemini Pro for generating image description
-    image_description = gemini_process(description_p, image, temperature=0.99)
-    description_feature = encoder.encode_text(image_description)
+        # Gemini Pro for generating image description
+        image_description = gemini_process(description_p, image, temperature=0.99)
+        description_feature = encoder.encode_text(image_description)
 
-    query_feature = image_feature + prediction_feature + description_feature
+        query_feature = image_feature + prediction_feature + description_feature
+    else:
+        query_feature = image_feature
+
     query_feature /= query_feature.norm(dim=-1, keepdim=True)
 
     logits = torch.matmul(query_feature, classifier["weights"])
@@ -109,27 +117,31 @@ def classify(image, classifier):
     return classifier["class_names"][index.item()]
 
 
-def main():
-    with open('key2.txt', "r") as file:
-        api_key = file.read().strip()
-    genai.configure(api_key=api_key)
-
-    # classifier = create_classifier(class_names=classes_label, k=5)
-    # torch.save(classifier, "zero_shot_classifier.pth")
-
+def main(use_llm, k=5):
     testset = torchvision.datasets.CIFAR100(
         root='./data',
         train=False,
         download=True,
     )
 
-    classifier = torch.load("zero_shot_classifier.pth")
+    if use_llm:
+        print('USING_LLM')
+        with open('key2.txt', "r") as file:
+            api_key = file.read().strip()
+        genai.configure(api_key=api_key)
+        classifier = create_classifier(class_names=classes_label, k=k)
+        torch.save(classifier, "zero_shot_classifier.pth")
+    else:
+        print('NOT_USING_LLM')
+        classifier = create_classifier(class_names=classes_label, k=0)
+        torch.save(classifier, "zero_shot_classifier_without_llm.pth")
+
     correct_count = 0
     mistake_count = 0
     for i, (img, label) in enumerate(tqdm.tqdm(testset, total=500)):
         if i >= 500:
             break
-        predicted_label = classify(img, classifier)
+        predicted_label = classify(img, classifier, use_llm=use_llm)
         if classes_label[label] == predicted_label:
             correct_count += 1
             print(f'Correct! Predicted: {predicted_label}; Label: {classes_label[label]}')
@@ -140,4 +152,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--use_llm", action="store_true", help="Set to enable LLM usage")
+    args = parser.parse_args()
+
+    main(args.use_llm)
