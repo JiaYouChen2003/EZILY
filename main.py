@@ -1,6 +1,7 @@
 import time
 import random
 import argparse
+import csv
 import torch
 import torchvision
 import google.generativeai as genai
@@ -125,29 +126,35 @@ def main(use_llm, k=5):
     )
 
     if use_llm:
+        suffix = 'basic'
         print('USING_LLM')
         with open('key2.txt', "r") as file:
             api_key = file.read().strip()
         genai.configure(api_key=api_key)
         classifier = create_classifier(class_names=classes_label, k=k)
-        torch.save(classifier, "zero_shot_classifier.pth")
+        torch.save(classifier, f"zero_shot_classifier_{suffix}.pth")
     else:
+        suffix = 'without_llm'
         print('NOT_USING_LLM')
         classifier = create_classifier(class_names=classes_label, k=0)
-        torch.save(classifier, "zero_shot_classifier_without_llm.pth")
+        torch.save(classifier, f"zero_shot_classifier_{suffix}.pth")
 
     correct_count = 0
     mistake_count = 0
-    for i, (img, label) in enumerate(tqdm.tqdm(testset, total=500)):
-        if i >= 500:
-            break
-        predicted_label = classify(img, classifier, use_llm=use_llm)
-        if classes_label[label] == predicted_label:
-            correct_count += 1
-            print(f'Correct! Predicted: {predicted_label}; Label: {classes_label[label]}')
-        else:
-            mistake_count += 1
-            print(f'Mistake. Predicted: {predicted_label}; Label: {classes_label[label]}')
+    with open(f'mistake_predicted_result_{suffix}.csv', "w", newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['Predict', 'Label'])
+        for i, (img, label) in enumerate(tqdm.tqdm(testset, total=200)):
+            if i >= 200:
+                break
+            predicted_label = classify(img, classifier, use_llm=use_llm)
+            if classes_label[label] == predicted_label:
+                correct_count += 1
+                print(f'Correct! Predicted: {predicted_label}; Label: {classes_label[label]}; Count: {correct_count}')
+            else:
+                mistake_count += 1
+                writer.writerow([predicted_label, classes_label[label]])
+                print(f'Mistake. Predicted: {predicted_label}; Label: {classes_label[label]}; Amount: {mistake_count}')
     print(f'Accuracy: {(100 * correct_count / (correct_count + mistake_count)):.4f}%')
 
 
