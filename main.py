@@ -7,9 +7,9 @@ import torchvision
 import google.generativeai as genai
 import tqdm
 
-from fixed_prompts import classification_p, description_p, class_ps
+from fixed_prompts import classification_p, description_p, class_ps, class_ps_super
 from cross_modal_encoder import encoder
-from cifar_100_label import classes_label
+from cifar_100_label import classes_label, get_superclass_label
 
 
 def gemini_process(prompt, image=None, temperature=0.99):
@@ -48,7 +48,7 @@ def gemini_process(prompt, image=None, temperature=0.99):
         return prompt
 
 
-def create_classifier(class_names, k=10):
+def create_classifier(class_names, use_super_class=False, k=5):
     """
     Constructs a zero-shot image classifier.
     Args:
@@ -69,10 +69,17 @@ def create_classifier(class_names, k=10):
         llm_class_description = torch.zeros((1, encoder.output_feature_length))
 
         if k != 0:
-            for _ in range(k // len(class_ps)):
-                for class_p in class_ps:
-                    llm_description = gemini_process(class_p.format(class_name=class_name), temperature=0.99)
-                    llm_class_description += encoder.encode_text(llm_description)
+            if use_super_class:
+                for _ in range(k // len(class_ps_super)):
+                    for class_p in class_ps_super:
+                        llm_description = gemini_process(class_p.format(class_name=class_name,
+                                                                        super_class_name=get_superclass_label(class_name)), temperature=0.99)
+                        llm_class_description += encoder.encode_text(llm_description)
+            else:
+                for _ in range(k // len(class_ps)):
+                    for class_p in class_ps:
+                        llm_description = gemini_process(class_p.format(class_name=class_name), temperature=0.99)
+                        llm_class_description += encoder.encode_text(llm_description)
 
             llm_class_description /= k
 
@@ -118,7 +125,7 @@ def classify(image, classifier, use_llm=True):
     return classifier["class_names"][index.item()]
 
 
-def main(use_llm, k=5):
+def main(use_llm, use_super_class, k=5):
     testset = torchvision.datasets.CIFAR100(
         root='./data',
         train=False,
@@ -126,41 +133,50 @@ def main(use_llm, k=5):
     )
 
     if use_llm:
-        suffix = 'basic'
+        if use_super_class:
+            suffix = 'super'
+            print('USING_SUPER_CLASS')
+        else:
+            suffix = 'basic'
+            print('USING_BASIC_PROMPT')
         print('USING_LLM')
-        with open('key2.txt', "r") as file:
+        with open('key.txt', "r") as file:
             api_key = file.read().strip()
         genai.configure(api_key=api_key)
-        classifier = create_classifier(class_names=classes_label, k=k)
-        torch.save(classifier, f"zero_shot_classifier_{suffix}.pth")
+        # classifier = create_classifier(class_names=classes_label, use_super_class=use_super_class, k=k)
+        # torch.save(classifier, f"zero_shot_classifier_{suffix}.pth")
+        classifier = torch.load(f"zero_shot_classifier_{suffix}.pth", weights_only=False)
     else:
         suffix = 'without_llm'
         print('NOT_USING_LLM')
         classifier = create_classifier(class_names=classes_label, k=0)
         torch.save(classifier, f"zero_shot_classifier_{suffix}.pth")
 
-    correct_count = 0
-    mistake_count = 0
+    correct_count = 27
+    mistake_count = 11
     with open(f'mistake_predicted_result_{suffix}.csv', "w", newline='') as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(['Predict', 'Label'])
-        for i, (img, label) in enumerate(tqdm.tqdm(testset, total=200)):
-            if i >= 200:
+        for i, (img, label) in enumerate(tqdm.tqdm(testset, total=98)):
+            if i >= 98:
                 break
+            if i < correct_count + mistake_count:
+                continue
             predicted_label = classify(img, classifier, use_llm=use_llm)
             if classes_label[label] == predicted_label:
                 correct_count += 1
-                print(f'Correct! Predicted: {predicted_label}; Label: {classes_label[label]}; Count: {correct_count}')
+                print(f'\nCorrect! Predicted: {predicted_label}; Label: {classes_label[label]}; Count: {correct_count}')
             else:
                 mistake_count += 1
                 writer.writerow([predicted_label, classes_label[label]])
-                print(f'Mistake. Predicted: {predicted_label}; Label: {classes_label[label]}; Amount: {mistake_count}')
+                print(f'\nMistake. Predicted: {predicted_label}; Label: {classes_label[label]}; Amount: {mistake_count}')
     print(f'Accuracy: {(100 * correct_count / (correct_count + mistake_count)):.4f}%')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--use_llm", action="store_true", help="Set to enable LLM usage")
+    parser.add_argument("--use_super_class", action="store_true", help="Set to use super class in prompt")
     args = parser.parse_args()
 
-    main(args.use_llm)
+    main(args.use_llm, args.use_super_class)

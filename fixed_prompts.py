@@ -6,11 +6,28 @@ Here are the class labels: {classes}'
 description_p = 'What do you see? \
 Describe any object precisely, including its type or class.'
 
-class_ps = ['1. Describe what a {class_name} looks like \
-in one or two sentences.',
+class_ps = ['1. Describe what a {class_name} looks like in one or two sentences.',
             '2. How can you identify a {class_name} in one or two sentences?',
             '3. What does a {class_name} look like? \
 Respond with one or two sentences.',
             '4. Describe an image from the internet of a {class_name}. \
 Respond with one or two sentences.',
             '5. A short caption of an image of a {class_name}:']
+
+# Compare
+# class_ps_super = ['1. Describe what a {class_name} looks like compare to other {super_class_name} in one or two sentences.',
+#                   '2. How can you identify a {class_name} compare to other {super_class_name} in one or two sentences?',
+#                   '3. What does a {class_name} look like compare to other {super_class_name}? \
+# Respond with one or two sentences.',
+#                   '4. Describe an image from the internet of a {class_name} compare to other {super_class_name}. \
+# Respond with one or two sentences.',
+#                   '5. A short caption of an image of a {class_name} compare to other {super_class_name}:']
+
+# Different
+# class_ps_super = ['1. Describe what a {class_name} looks like different to {super_class_name} in one or two sentences.',
+#                   '2. How can you identify a {class_name} different to {super_class_name} in one or two sentences?',
+#                   '3. What does a {class_name} look like different to {super_class_name}? \
+# Respond with one or two sentences.',
+#                   '4. Describe an image from the internet of a {class_name} different to {super_class_name}. \
+# Respond with one or two sentences.',
+#                   '5. A short caption of an image of a {class_name} different to {super_class_name}:']
