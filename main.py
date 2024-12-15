@@ -3,13 +3,15 @@ import random
 import argparse
 import csv
 import torch
+from torch.utils.data import Subset
 import torchvision
 import google.generativeai as genai
 import tqdm
 
 from fixed_prompts import classification_p, description_p, class_ps, class_ps_super
 from cross_modal_encoder import encoder
-from cifar_100_label import classes_label, get_superclass_label
+import cifar_100_label
+import food_101_label
 
 
 def gemini_process(prompt, image=None, temperature=0.99):
@@ -73,7 +75,7 @@ def create_classifier(class_names, use_super_class=False, k=5):
                 for _ in range(k // len(class_ps_super)):
                     for class_p in class_ps_super:
                         llm_description = gemini_process(class_p.format(class_name=class_name,
-                                                                        super_class_name=get_superclass_label(class_name)), temperature=0.99)
+                                                                        super_class_name=cifar_100_label.get_superclass_label(class_name)), temperature=0.99)
                         llm_class_description += encoder.encode_text(llm_description)
             else:
                 for _ in range(k // len(class_ps)):
@@ -125,12 +127,29 @@ def classify(image, classifier, use_llm=True):
     return classifier["class_names"][index.item()]
 
 
-def main(use_llm, use_super_class, k=5):
-    testset = torchvision.datasets.CIFAR100(
-        root='./data',
-        train=False,
-        download=True,
-    )
+def main(use_llm, use_super_class, use_food_101, k=5):
+    if use_food_101:
+        if use_super_class:
+            print('Cannot use food-101 with super classes')
+            return 1
+        testset = torchvision.datasets.Food101(
+            root='./food-101',
+            split='test',
+            download=True,
+        )
+        indices = list(range(len(testset)))
+        seed = 42
+        random.seed(seed)
+        random.shuffle(indices)
+        testset = Subset(testset, indices)
+        classes_label = food_101_label.classes_label
+    else:
+        testset = torchvision.datasets.CIFAR100(
+            root='./data',
+            train=False,
+            download=True,
+        )
+        classes_label = cifar_100_label.classes_label
 
     if use_llm:
         if use_super_class:
@@ -152,13 +171,13 @@ def main(use_llm, use_super_class, k=5):
         classifier = create_classifier(class_names=classes_label, k=0)
         torch.save(classifier, f"zero_shot_classifier_{suffix}.pth")
 
-    correct_count = 27
-    mistake_count = 11
+    correct_count = 0
+    mistake_count = 0
     with open(f'mistake_predicted_result_{suffix}.csv', "w", newline='') as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(['Predict', 'Label'])
-        for i, (img, label) in enumerate(tqdm.tqdm(testset, total=98)):
-            if i >= 98:
+        for i, (img, label) in enumerate(tqdm.tqdm(testset, total=400)):
+            if i >= 400:
                 break
             if i < correct_count + mistake_count:
                 continue
@@ -177,6 +196,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--use_llm", action="store_true", help="Set to enable LLM usage")
     parser.add_argument("--use_super_class", action="store_true", help="Set to use super class in prompt")
+    parser.add_argument("--use_food_101", action="store_true", help="Set to use food 101 dataset rather than cifar 100")
     args = parser.parse_args()
 
-    main(args.use_llm, args.use_super_class)
+    main(args.use_llm, args.use_super_class, args.use_food_101)
